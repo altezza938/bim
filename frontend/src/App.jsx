@@ -11,10 +11,13 @@ import {
   Box,
   FileDigit,
   MapPin,
-  Hexagon
+  Hexagon,
+  Layers
 } from 'lucide-react';
+import BoundaryViewer from './BoundaryViewer';
 
 function App() {
+  const [activeTab, setActiveTab] = useState('generator'); // 'generator' | 'viewer'
   const [files, setFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [status, setStatus] = useState('idle'); // idle, processing, success, error
@@ -47,13 +50,12 @@ function App() {
   };
 
   const addFiles = (newFiles) => {
-    // Basic validation could go here
     setFiles(prev => [...prev, ...newFiles]);
   };
 
   const removeFile = (index) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
-    if (files.length === 1) { // If it was the last file
+    if (files.length === 1) {
       setStatus('idle');
       setMessage('Waiting for files...');
     }
@@ -80,8 +82,6 @@ function App() {
       console.log('Upload success:', response.data);
       setMessage(`Server received ${files.length} files. Job ID: ${response.data.jobId}. Waiting for Revit processing...`);
 
-      // In a real scenario, we would poll the backend for job status here.
-      // For this demo, we'll simulate processing time.
       setTimeout(() => {
         setStatus('success');
         setMessage('BIM Model generated successfully! Check your local Revit instance.');
@@ -111,121 +111,140 @@ function App() {
           </div>
           <h1>CEDD Slope Modeler</h1>
         </div>
+
+        <div className="tab-navigation">
+          <button
+            className={`tab-btn ${activeTab === 'generator' ? 'active' : ''}`}
+            onClick={() => setActiveTab('generator')}
+          >
+            <Box size={18} /> Revit Generator
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'viewer' ? 'active' : ''}`}
+            onClick={() => setActiveTab('viewer')}
+          >
+            <MapPin size={18} /> Boundary Viewer
+          </button>
+        </div>
+
         <div>
           <span className="file-badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#6EE7B7' }}>Revit 2025</span>
         </div>
       </header>
 
-      <main className="main-content">
-        <section className="upload-section">
-          <h2 className="section-title">
-            Data Upload Zone
-          </h2>
-
-          <div
-            className={`drop-zone ${isDragging ? 'active' : ''}`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <UploadCloud className="drop-zone-icon" />
-            <h3>Drag & Drop Files Here</h3>
-            <p>Upload Civil 3D exports, LiDAR point clouds, or boundary definitions to automatically generate authoritative CEDD BIM models.</p>
-
-            <div className="file-types">
-              <span className="file-badge">.CSV</span>
-              <span className="file-badge">.DGN / .DWG</span>
-              <span className="file-badge">.PDF</span>
-              <span className="file-badge">.LAS / .LAZ</span>
-              <span className="file-badge">.SHP</span>
-            </div>
-
-            <input
-              type="file"
-              multiple
-              ref={fileInputRef}
-              onChange={handleFileInput}
-              style={{ display: 'none' }}
-            />
-          </div>
-
-          {/* Optional: Add a 3D Viewer placeholder shown when status is success */}
-          {status === 'success' && (
-            <div className="glass-panel" style={{ padding: '1.5rem', marginTop: '1rem' }}>
-              <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Box size={20} className="file-icon" />
-                Generated Preview
-              </h3>
-              <div className="viewer-placeholder">
-                <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
-                  <Hexagon size={48} style={{ opacity: 0.5, marginBottom: '1rem', animation: 'spin 10s linear infinite' }} />
-                  <p>3D Web Viewer Integration Placeholder</p>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
-        <aside>
-          <div className="glass-panel status-panel">
-            <h2 className="section-title" style={{ fontSize: '1.1rem' }}>
-              Job Status
+      {activeTab === 'generator' ? (
+        <main className="main-content">
+          <section className="upload-section">
+            <h2 className="section-title">
+              Data Upload Zone
             </h2>
 
-            <button
-              className="action-btn"
-              onClick={triggerBIMGeneration}
-              disabled={files.length === 0 || status === 'processing'}
+            <div
+              className={`drop-zone ${isDragging ? 'active' : ''}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
             >
-              {status === 'processing' ? (
-                <><Loader2 size={20} className="spinner" /> Generating...</>
-              ) : (
-                <><Play size={20} fill="currentColor" /> Generate BIM Model</>
-              )}
-            </button>
+              <UploadCloud className="drop-zone-icon" />
+              <h3>Drag & Drop Files Here</h3>
+              <p>Upload Civil 3D exports, LiDAR point clouds, or boundary definitions to automatically generate authoritative CEDD BIM models.</p>
 
-            <div className={`status-indicator ${status}`}>
-              {status === 'idle' && <AlertCircle size={20} />}
-              {status === 'processing' && <Loader2 size={20} className="spinner" />}
-              {status === 'success' && <CheckCircle2 size={20} />}
-              {status === 'error' && <AlertCircle size={20} />}
-              <div>
-                <strong style={{ display: 'block', marginBottom: '4px' }}>
-                  {status === 'idle' && 'Waiting'}
-                  {status === 'processing' && 'Processing...'}
-                  {status === 'success' && 'Operation Complete'}
-                  {status === 'error' && 'Error Encountered'}
-                </strong>
-                {message}
+              <div className="file-types">
+                <span className="file-badge">.CSV</span>
+                <span className="file-badge">.DGN / .DWG</span>
+                <span className="file-badge">.PDF</span>
+                <span className="file-badge">.LAS / .LAZ</span>
+                <span className="file-badge">.SHP</span>
               </div>
+
+              <input
+                type="file"
+                multiple
+                ref={fileInputRef}
+                onChange={handleFileInput}
+                style={{ display: 'none' }}
+              />
             </div>
 
-            {files.length > 0 && (
-              <div style={{ marginTop: '1rem' }}>
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Queued Files ({files.length})
+            {status === 'success' && (
+              <div className="glass-panel" style={{ padding: '1.5rem', marginTop: '1rem' }}>
+                <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Box size={20} className="file-icon" />
+                  Generated Preview
                 </h3>
-                <div className="file-list">
-                  {files.map((file, index) => (
-                    <div key={`${file.name}-${index}`} className="file-item">
-                      <div className="file-info">
-                        {getFileIcon(file.name)}
-                        <span className="file-name" title={file.name}>{file.name}</span>
-                      </div>
-                      {status !== 'processing' && (
-                        <button className="remove-btn" onClick={() => removeFile(index)} title="Remove file">
-                          <X size={16} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                <div className="viewer-placeholder">
+                  <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                    <Hexagon size={48} style={{ opacity: 0.5, marginBottom: '1rem', animation: 'spin 10s linear infinite' }} />
+                    <p>3D Web Viewer Integration Placeholder</p>
+                  </div>
                 </div>
               </div>
             )}
-          </div>
-        </aside>
-      </main>
+          </section>
+
+          <aside>
+            <div className="glass-panel status-panel">
+              <h2 className="section-title" style={{ fontSize: '1.1rem' }}>
+                Job Status
+              </h2>
+
+              <button
+                className="action-btn"
+                onClick={triggerBIMGeneration}
+                disabled={files.length === 0 || status === 'processing'}
+              >
+                {status === 'processing' ? (
+                  <><Loader2 size={20} className="spinner" /> Generating...</>
+                ) : (
+                  <><Play size={20} fill="currentColor" /> Generate BIM Model</>
+                )}
+              </button>
+
+              <div className={`status-indicator ${status}`}>
+                {status === 'idle' && <AlertCircle size={20} />}
+                {status === 'processing' && <Loader2 size={20} className="spinner" />}
+                {status === 'success' && <CheckCircle2 size={20} />}
+                {status === 'error' && <AlertCircle size={20} />}
+                <div>
+                  <strong style={{ display: 'block', marginBottom: '4px' }}>
+                    {status === 'idle' && 'Waiting'}
+                    {status === 'processing' && 'Processing...'}
+                    {status === 'success' && 'Operation Complete'}
+                    {status === 'error' && 'Error Encountered'}
+                  </strong>
+                  {message}
+                </div>
+              </div>
+
+              {files.length > 0 && (
+                <div style={{ marginTop: '1rem' }}>
+                  <h3 style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Queued Files ({files.length})
+                  </h3>
+                  <div className="file-list">
+                    {files.map((file, index) => (
+                      <div key={`${file.name}-${index}`} className="file-item">
+                        <div className="file-info">
+                          {getFileIcon(file.name)}
+                          <span className="file-name" title={file.name}>{file.name}</span>
+                        </div>
+                        {status !== 'processing' && (
+                          <button className="remove-btn" onClick={() => removeFile(index)} title="Remove file">
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </aside>
+        </main>
+      ) : (
+        <BoundaryViewer />
+      )}
     </div>
   );
 }
