@@ -64,7 +64,7 @@ namespace CEDDSlopeModeler
             }
 
             // Step 3: Start Revit Transaction
-            using (Transaction trans = new Transaction(doc, "Generate CEDD BIM Models (SHP Workflow)"))
+            using (Transaction trans = new Transaction(doc, "Generate CEDD BIM Models & Drawings"))
             {
                 trans.Start();
 
@@ -76,8 +76,22 @@ namespace CEDDSlopeModeler
                     return Result.Failed;
                 }
 
+                // Get ID for Section View Type
+                ViewFamilyType sectionViewType = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewFamilyType))
+                    .Cast<ViewFamilyType>()
+                    .FirstOrDefault(x => x.ViewFamily == ViewFamily.Section);
+
+                // Get ID for Title Block Type (for Sheet creation)
+                FamilySymbol titleBlockType = new FilteredElementCollector(doc)
+                    .OfClass(typeof(FamilySymbol))
+                    .OfCategory(BuiltInCategory.OST_TitleBlocks)
+                    .Cast<FamilySymbol>()
+                    .FirstOrDefault();
+
                 int pointCount = 0;
                 int lineCount = 0;
+                List<ViewSection> generatedSections = new List<ViewSection>();
 
                 // 3a: Process Point Features (Soil Nails, Tree Rings)
                 foreach (var ptFeature in points)
@@ -109,15 +123,46 @@ namespace CEDDSlopeModeler
                     SetParameter(instance, "Overall Length", ptFeature.Length * mToFt);
                     SetParameter(instance, "Hole Dia", ptFeature.HoleDia);
                     pointCount++;
+
+                    // --- AUTOMATED DRAWING PRODUCTION: SECTION VIEW ---
+                    if (sectionViewType != null)
+                    {
+                        // Define Section Box parameters
+                        // We want the section to look ALONG the Azimuth or perpendicular to it to show the full nail length.
+                        // Assuming viewing perpendicular to the azimuth to see the slope dip:
+                        double azRad = ptFeature.Azimuth * (Math.PI / 180.0);
+                        XYZ viewDirection = new XYZ(Math.Cos(azRad), Math.Sin(azRad), 0).Normalize(); 
+                        XYZ upDirection = XYZ.BasisZ;
+                        XYZ rightDirection = upDirection.CrossProduct(viewDirection).Normalize();
+
+                        // Build Transform
+                        Transform t = Transform.Identity;
+                        t.Origin = location;
+                        t.BasisX = rightDirection;
+                        t.BasisY = upDirection;
+                        t.BasisZ = viewDirection;
+
+                        // Create BoundingBox
+                        BoundingBoxXYZ sectionBox = new BoundingBoxXYZ();
+                        sectionBox.Transform = t;
+
+                        // Width of view (left to right), Height (bottom to top), Depth (front to back)
+                        double sectionWidth = 20 * mToFt; // 20m wide
+                        double sectionHeight = 20 * mToFt; // 20m high
+                        double sectionDepth = 5 * mToFt; // 5m deep
+
+                        sectionBox.Min = new XYZ(-sectionWidth / 2, -sectionHeight / 2, -sectionDepth);
+                        sectionBox.Max = new XYZ(sectionWidth / 2, sectionHeight / 2, 0);
+
+                        ViewSection sectionView = ViewSection.CreateSection(doc, sectionViewType.Id, sectionBox);
+                        sectionView.Name = $"Soil Nail_{pointCount}_Section";
+                        generatedSections.Add(sectionView);
+                    }
                 }
 
                 // 3b: Process Line Features (U-Channels, Hoarding)
                 foreach (var lineFeature in lines)
                 {
-                    // For line-based families like U-Channels, we usually build Adaptive Components 
-                    // or Line-Based Generic Models in Revit. 
-                    // This logic assumes `familySymbol` is a Line-Based Family (2 reference points).
-                    
                     for (int i = 0; i < lineFeature.Vertices.Count - 1; i++)
                     {
                         XYZ startPt = lineFeature.Vertices[i];
@@ -133,8 +178,53 @@ namespace CEDDSlopeModeler
                     }
                 }
 
+                // --- AUTOMATED DRAWING PRODUCTION: SHEET & PDF EXPORT ---
+                if (titleBlockType != null && generatedSections.Count > 0)
+                {
+                    // Create a new Sheet
+                    ViewSheet sheet = ViewSheet.Create(doc, titleBlockType.Id);
+                    sheet.Name = "CEDD Automated Slope Sections";
+                    sheet.SheetNumber = "A-101";
+
+                    // Place the first section on the sheet for demonstration
+                    // In a real plugin, calculate grid layouts and create multiple sheets as needed
+                    XYZ viewportLocation = new XYZ(1.5, 1.0, 0); // Location on the sheet layout
+                    if (Viewport.CanAddViewToSheet(doc, sheet.Id, generatedSections[0].Id))
+                    {
+                        Viewport.Create(doc, sheet.Id, generatedSections[0].Id, viewportLocation);
+                    }
+
+                    // Batch PDF Export Setup
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    
+                    PDFExportOptions pdfOptions = new PDFExportOptions()
+                    {
+                        FileName = "CEDD_Slope_Sections",
+                        PaperFormat = ExportPaperFormat.ISO_A1,
+                        AlwaysUseName = true,
+                        Combine = true,
+                        ExportViewNameString = sheet.Name
+                    };
+
+                    List<ElementId> viewsToExport = new List<ElementId> { sheet.Id };
+
+                    try 
+                    {
+                        doc.Export(desktopPath, viewsToExport, pdfOptions);
+                        TaskDialog.Show("Drawings Engine", $"Successfully generated {pointCount} Models, sliced {generatedSections.Count} Sections, created a Sheet, and exported PDF to Desktop!");
+                    } 
+                    catch (Exception ex)
+                    {
+                        // Older Revit versions might not support native PDF API, fallback or log
+                        TaskDialog.Show("Drawings Engine", $"Models and Sections created. PDF Export requires Revit 2022+ native API. Setup handled, but hit error: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    TaskDialog.Show("Success", $"Successfully generated {pointCount} Points (Nails/Trees) and {lineCount} Curve Segments (Channels/Hoarding).");
+                }
+
                 trans.Commit();
-                TaskDialog.Show("Success", $"Successfully generated {pointCount} Points (Nails/Trees) and {lineCount} Curve Segments (Channels/Hoarding).");
             }
 
             return Result.Succeeded;
