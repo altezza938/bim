@@ -216,7 +216,26 @@ namespace CEDDSlopeModeler
                     catch (Exception ex)
                     {
                         // Older Revit versions might not support native PDF API, fallback or log
-                        TaskDialog.Show("Drawings Engine", $"Models and Sections created. PDF Export requires Revit 2022+ native API. Setup handled, but hit error: {ex.Message}");
+                        TaskDialog.Show("Drawings Engine", $"Models and Sections created. PDF Setup handled, but hit error: {ex.Message}");
+                    }
+
+                    // --- AUTOMATED GEO-TECH ANALYSIS EXPORT: SLOPE/W (DGN) ---
+                    DGNExportOptions dgnOptions = new DGNExportOptions();
+                    
+                    try 
+                    {
+                        // Export the generated 2D section views to DGN
+                        // The user will import these 2D geometry lines directly into GeoStudio SLOPE/W
+                        List<ElementId> sectionIds = generatedSections.Select(v => v.Id).ToList();
+                        if (sectionIds.Count > 0)
+                        {
+                            doc.Export(desktopPath, "CEDD_SlopeW_Sections", sectionIds, dgnOptions);
+                            TaskDialog.Show("SLOPE/W Engine", $"Successfully exported {sectionIds.Count} 2D Cross-Sections to DGN for SLOPE/W analysis!");
+                        }
+                    } 
+                    catch (Exception ex)
+                    {
+                        TaskDialog.Show("SLOPE/W Engine", $"Could not export DGN: {ex.Message}");
                     }
                 }
                 else
