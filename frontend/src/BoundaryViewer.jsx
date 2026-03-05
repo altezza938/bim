@@ -55,8 +55,10 @@ export default function BoundaryViewer() {
             formData.append('fgdb', file);
 
             try {
-                // Assuming backend is on port 3001
-                const response = await fetch('http://localhost:3001/api/upload-fgdb', {
+                // If the frontend is hosted on HTTPS (like GitHub pages), 
+                // making a fetch to http://localhost:3001 will trigger a Mixed Content block.
+                const apiUrl = 'http://localhost:3001/api/upload-fgdb';
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     body: formData,
                 });
@@ -72,7 +74,12 @@ export default function BoundaryViewer() {
                 setGeoJsonData({ type: "FGDB_Reference" }); // Dummy object to unlock UI
                 setSelectedFeature(null);
             } catch (err) {
-                alert(`Error: ${err.message}`);
+                console.error("Upload error details:", err);
+                if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+                    alert("Network Error: Could not connect to the local Python backend on port 3001.\n\nIf you are using the live GitHub Pages site, your browser is blocking the connection to your local machine (Mixed Content Error). \n\nPlease run the frontend locally using 'npm run dev' to use the FGDB parser, OR allow insecure localhost connections in your browser settings.");
+                } else {
+                    alert(`Error: ${err.message}`);
+                }
             } finally {
                 setIsLoading(false);
             }
@@ -132,7 +139,12 @@ export default function BoundaryViewer() {
                     alert('Geometry not found for this feature.');
                 }
             } catch (err) {
-                alert(`Error: ${err.message}`);
+                console.error("Extraction error details:", err);
+                if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+                    alert("Network Error: Could not connect to the local Python backend on port 3001.\n\nPlease run the frontend locally using 'npm run dev' to use this feature.");
+                } else {
+                    alert(`Error: ${err.message}`);
+                }
             } finally {
                 setIsLoading(false);
             }
