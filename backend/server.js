@@ -91,6 +91,115 @@ app.get('/api/job/:jobId', (req, res) => {
     }
 });
 
+/**
+ * Upload FGDB and List Features
+ */
+app.post('/api/upload-fgdb', upload.single('fgdb'), (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No FGDB zip uploaded' });
+        }
+
+        const zipPath = req.file.path;
+        console.log(`Processing FGDB: ${zipPath}`);
+
+        // Call the Python script to list features
+        const pythonProcess = spawn('python3', [
+            path.join(__dirname, 'extract_fgdb.py'),
+            zipPath,
+            'list'
+        ]);
+
+        let dataString = '';
+        let errorString = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            dataString += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            errorString += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                console.error(`Python script exited with code ${code}. Error: ${errorString}`);
+                return res.status(500).json({ error: 'Failed to parse FGDB', details: errorString });
+            }
+
+            try {
+                const result = JSON.parse(dataString);
+                if (result.error) {
+                    return res.status(500).json({ error: result.error });
+                }
+
+                res.json({
+                    message: 'FGDB parsed successfully',
+                    filePath: zipPath,
+                    features: result.features
+                });
+            } catch (e) {
+                console.error('JSON parse error from Python:', e, dataString);
+                res.status(500).json({ error: 'Invalid response from FGDB parser' });
+            }
+        });
+
+    } catch (error) {
+        console.error('Upload FGDB error:', error);
+        res.status(500).json({ error: 'Internal server error during FGDB upload' });
+    }
+});
+
+/**
+ * Extract Specific Feature from FGDB
+ */
+app.post('/api/extract-feature', (req, res) => {
+    const { filePath, featureNo } = req.body;
+
+    if (!filePath || !featureNo) {
+        return res.status(400).json({ error: 'File path and Feature Number are required' });
+    }
+
+    console.log(`Extracting Feature ${featureNo} from ${filePath}`);
+
+    const pythonProcess = spawn('python3', [
+        path.join(__dirname, 'extract_fgdb.py'),
+        filePath,
+        'extract',
+        featureNo
+    ]);
+
+    let dataString = '';
+    let errorString = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+        dataString += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+        errorString += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+        if (code !== 0) {
+            console.error(`Python script exited with code ${code}. Error: ${errorString}`);
+            return res.status(500).json({ error: 'Failed to extract feature', details: errorString });
+        }
+
+        try {
+            const result = JSON.parse(dataString);
+            if (result.error) {
+                return res.status(500).json({ error: result.error });
+            }
+
+            res.json(result); // Return the GeoJSON
+        } catch (e) {
+            console.error('JSON parse error from Python:', e, dataString);
+            res.status(500).json({ error: 'Invalid response from GeoJSON extractor' });
+        }
+    });
+});
+
 app.listen(PORT, () => {
     console.log(`BIM Generator Backend listening on port ${PORT}`);
 });

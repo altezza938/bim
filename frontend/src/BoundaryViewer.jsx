@@ -16,10 +16,12 @@ function ChangeView({ bounds }) {
 
 export default function BoundaryViewer() {
     const [geoJsonData, setGeoJsonData] = useState(null);
-    const [features, setFeatures] = useState([]);
-    const [selectedFeature, setSelectedFeature] = useState(null);
+    const [features, setFeatures] = useState([]); // This will now just be a list of strings (Feature Numbers)
+    const [selectedFeature, setSelectedFeature] = useState(null); // This will hold the actual GeoJSON of the selected feature
     const [searchQuery, setSearchQuery] = useState('');
     const [isDragging, setIsDragging] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [uploadedFilePath, setUploadedFilePath] = useState(null);
     const fileInputRef = useRef(null);
 
     const handleDragOver = (e) => {
@@ -40,37 +42,105 @@ export default function BoundaryViewer() {
         }
     };
 
-    const processFile = (file) => {
-        if (!file.name.endsWith('.geojson') && !file.name.endsWith('.json')) {
-            alert("Please upload a .geojson file.");
+    const processFile = async (file) => {
+        if (!file.name.endsWith('.geojson') && !file.name.endsWith('.json') && !file.name.endsWith('.zip')) {
+            alert("Please upload a .geojson or .gdb.zip file.");
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = (event) => {
+        if (file.name.endsWith('.zip')) {
+            // Process FGDB Zip via Backend
+            setIsLoading(true);
+            const formData = new FormData();
+            formData.append('fgdb', file);
+
             try {
-                const json = JSON.parse(event.target.result);
-                if (json.type === "FeatureCollection") {
-                    setGeoJsonData(json);
-                    setFeatures(json.features || []);
-                    setSelectedFeature(null);
-                } else {
-                    alert("Invalid GeoJSON Format (Must be a FeatureCollection).");
+                // Assuming backend is on port 3001
+                const response = await fetch('http://localhost:3001/api/upload-fgdb', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to process FGDB');
                 }
+
+                const data = await response.json();
+                setUploadedFilePath(data.filePath);
+                setFeatures(data.features || []);
+                setGeoJsonData({ type: "FGDB_Reference" }); // Dummy object to unlock UI
+                setSelectedFeature(null);
             } catch (err) {
-                alert("Failed to parse the JSON file.");
+                alert(`Error: ${err.message}`);
+            } finally {
+                setIsLoading(false);
             }
-        };
-        reader.readAsText(file);
+        } else {
+            // Process standard GeoJSON locally
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const json = JSON.parse(event.target.result);
+                    if (json.type === "FeatureCollection") {
+                        setGeoJsonData(json);
+                        // For local geojson, we store the whole feature object
+                        setFeatures(json.features || []);
+                        setSelectedFeature(null);
+                    } else {
+                        alert("Invalid GeoJSON Format (Must be a FeatureCollection).");
+                    }
+                } catch (err) {
+                    alert("Failed to parse the JSON file.");
+                }
+            };
+            reader.readAsText(file);
+        }
     };
 
     const extractFeatureNumber = (feature) => {
-        // Assuming the FGDB standard properties. Adjust these keys if your data uses different field names.
+        if (typeof feature === 'string' || typeof feature === 'number') return feature; // It's from FGDB
+        // For local GeoJSON
         return feature.properties?.Object_ID ||
             feature.properties?.Feature_No ||
             feature.properties?.id ||
             feature.properties?.OBJECTID ||
             "Unknown Feature ID";
+    };
+
+    const fetchGeometryForFeature = async (featureNo) => {
+        if (uploadedFilePath) {
+            // It's an FGDB feature, we need to fetch its geometry from the backend
+            setIsLoading(true);
+            try {
+                const response = await fetch('http://localhost:3001/api/extract-feature', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: uploadedFilePath, featureNo: featureNo })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to extract geometry');
+                }
+
+                const geojsonData = await response.json();
+                // We assume backend returns a FeatureCollection, so we take the first feature
+                if (geojsonData.features && geojsonData.features.length > 0) {
+                    setSelectedFeature(geojsonData.features[0]);
+                } else {
+                    alert('Geometry not found for this feature.');
+                }
+            } catch (err) {
+                alert(`Error: ${err.message}`);
+            } finally {
+                setIsLoading(false);
+            }
+        } else {
+            // It's a local GeoJSON feature, we already have the geometry
+            const selected = features.find(f => extractFeatureNumber(f) === featureNo);
+            setSelectedFeature(selected);
+        }
     };
 
     const filteredFeatures = features.filter(f =>
@@ -155,10 +225,20 @@ export default function BoundaryViewer() {
                             onDrop={handleDrop}
                             onClick={() => fileInputRef.current?.click()}
                         >
-                            <UploadCloud className="drop-zone-icon" style={{ width: 32, height: 32, marginBottom: '0.5rem' }} />
-                            <h3 style={{ fontSize: '1rem' }}>Upload GeoJSON</h3>
-                            <p style={{ fontSize: '0.8rem' }}>Export FGDB to .geojson format</p>
-                            <input type="file" ref={fileInputRef} onChange={(e) => processFile(e.target.files[0])} style={{ display: 'none' }} accept=".json,.geojson" />
+                            {isLoading ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <div className="spinner" style={{ borderTopColor: 'var(--primary)', width: 32, height: 32, borderWidth: 4, borderStyle: 'solid', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
+                                    <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+                                    <p>Processing Data...</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <UploadCloud className="drop-zone-icon" style={{ width: 32, height: 32, marginBottom: '0.5rem' }} />
+                                    <h3 style={{ fontSize: '1rem' }}>Upload GeoJSON or FGDB (.zip)</h3>
+                                    <p style={{ fontSize: '0.8rem' }}>Drag or click to choose file</p>
+                                </>
+                            )}
+                            <input type="file" ref={fileInputRef} onChange={(e) => processFile(e.target.files[0])} style={{ display: 'none' }} accept=".json,.geojson,.zip" />
                         </div>
                     ) : (
                         <div className="status-indicator success" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -167,7 +247,7 @@ export default function BoundaryViewer() {
                                 <div style={{ fontSize: '0.8rem' }}>{features.length} Features found</div>
                             </div>
                             <button
-                                onClick={() => { setGeoJsonData(null); setFeatures([]); setSelectedFeature(null); }}
+                                onClick={() => { setGeoJsonData(null); setFeatures([]); setSelectedFeature(null); setUploadedFilePath(null); setSearchQuery(''); }}
                                 className="remove-btn"
                                 style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
                             >
@@ -198,11 +278,12 @@ export default function BoundaryViewer() {
                         <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.5rem' }}>
                             {filteredFeatures.map((feature, idx) => {
                                 const featureNo = extractFeatureNumber(feature);
-                                const isSelected = selectedFeature === feature;
+                                const isSelected = selectedFeature && extractFeatureNumber(selectedFeature) === featureNo;
                                 return (
                                     <button
                                         key={idx}
-                                        onClick={() => setSelectedFeature(feature)}
+                                        onClick={() => fetchGeometryForFeature(featureNo)}
+                                        disabled={isLoading}
                                         style={{
                                             display: 'flex', alignItems: 'center', gap: '0.75rem',
                                             padding: '0.75rem 1rem',
@@ -210,7 +291,7 @@ export default function BoundaryViewer() {
                                             border: `1px solid ${isSelected ? 'var(--primary)' : 'transparent'}`,
                                             borderRadius: '8px',
                                             color: 'var(--text-primary)',
-                                            cursor: 'pointer',
+                                            cursor: isLoading ? 'wait' : 'pointer',
                                             textAlign: 'left',
                                             transition: 'all 0.2s',
                                         }}
@@ -236,7 +317,7 @@ export default function BoundaryViewer() {
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
                         <div style={{ textAlign: 'center' }}>
                             <MapIcon size={48} style={{ opacity: 0.2, marginBottom: '1rem' }} />
-                            <p>Upload a GeoJSON file to view feature boundaries.</p>
+                            <p>Upload a GeoJSON or FGDB (.gdb.zip) file to view feature boundaries.</p>
                         </div>
                     </div>
                 ) : (
