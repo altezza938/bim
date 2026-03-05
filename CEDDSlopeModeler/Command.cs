@@ -10,8 +10,8 @@ using NetTopologySuite.Geometries;
 
 namespace CEDDSlopeModeler
 {
-    // DTO to hold rows representing Geo-features from the DBF table
-    public class SoilNailFeature
+    // DTO for discrete points (Soil Nails, Tree Rings)
+    public class PointFeature
     {
         public double X { get; set; }
         public double Y { get; set; }
@@ -22,9 +22,19 @@ namespace CEDDSlopeModeler
         public string HoleDia { get; set; } 
     }
 
+    // DTO for continuous elements (U-Channels, Hoarding)
+    public class LineFeature
+    {
+        public List<XYZ> Vertices { get; set; } = new List<XYZ>();
+        public string TypeName { get; set; }
+    }
+
     [Transaction(TransactionMode.Manual)]
     public class Command : IExternalCommand
     {
+        // Conversion factor (meters to decimal feet)
+        private const double mToFt = 3.28084;
+
         public Result Execute(
             ExternalCommandData commandData, 
             ref string message, 
@@ -33,23 +43,23 @@ namespace CEDDSlopeModeler
             UIApplication uiapp = commandData.Application;
             Document doc = uiapp.ActiveUIDocument.Document;
 
-            // Step 1: Prompt user for the path to the SHP file
-            string shpFilePath = @"C:\Path\To\soil_nails.shp"; 
+            // Step 1: Prompt user for the path to the SHP file and target family
+            string shpFilePath = @"C:\Path\To\features.shp"; 
             string familyFilePath = @"C:\Path\To\CEDDSlopeModeler\Families\19_SON-TYP-CSH-___-___.rfa"; 
-            string familySymbolName = "Nail Head_400x400"; // Example symbol name for Soil Nail
+            string familySymbolName = "Nail Head_400x400"; // Can be changed based on UI selection
 
             if (!File.Exists(shpFilePath))
             {
-                TaskDialog.Show("CEDD Slope Modeler", 
-                    "Could not find the Shapefile (.shp). In a real environment, allow user to browse.");
+                TaskDialog.Show("CEDD Slope Modeler", "Could not find the Shapefile (.shp).");
                 return Result.Cancelled;
             }
 
             // Step 2: Read Shapefile and DBF
-            List<SoilNailFeature> nails = ReadShapefile(shpFilePath);
-            if (nails == null || nails.Count == 0)
+            var (points, lines) = ReadShapefile(shpFilePath);
+
+            if (points.Count == 0 && lines.Count == 0)
             {
-                TaskDialog.Show("CEDD Slope Modeler", "No valid point features found in the Shapefile.");
+                TaskDialog.Show("CEDD Slope Modeler", "No valid point or line geometries found in the Shapefile.");
                 return Result.Failed;
             }
 
@@ -58,7 +68,6 @@ namespace CEDDSlopeModeler
             {
                 trans.Start();
 
-                // Ensure the Family is loaded
                 FamilySymbol familySymbol = GetOrLoadFamilySymbol(doc, familyFilePath, familySymbolName);
                 if (familySymbol == null)
                 {
@@ -67,60 +76,65 @@ namespace CEDDSlopeModeler
                     return Result.Failed;
                 }
 
-                int count = 0;
-                // Note: Revit internal units are decimal feet. 1 m = 3.28084 feet.
-                double mToFt = 3.28084;
+                int pointCount = 0;
+                int lineCount = 0;
 
-                foreach (var nail in nails)
+                // 3a: Process Point Features (Soil Nails, Tree Rings)
+                foreach (var ptFeature in points)
                 {
-                    // Create XYZ for location
-                    XYZ location = new XYZ(nail.X * mToFt, nail.Y * mToFt, nail.Z * mToFt);
+                    XYZ location = new XYZ(ptFeature.X * mToFt, ptFeature.Y * mToFt, ptFeature.Z * mToFt);
+                    FamilyInstance instance = doc.Create.NewFamilyInstance(location, familySymbol, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
 
-                    // Place the Family Instance
-                    FamilyInstance instance = doc.Create.NewFamilyInstance(
-                        location, 
-                        familySymbol, 
-                        Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
-
-                    // 1. Azimuth Rotation (Z-Axis / Horizontal Direction)
-                    // Azimuth is usually 0 = North, 90 = East, but in Revit 0 = East, 90 = North.
-                    // We must convert degrees to radians and adjust axis.
-                    if (nail.Azimuth != 0)
+                    // Azimuth Rotation
+                    if (ptFeature.Azimuth != 0)
                     {
-                        double azimuthRad = nail.Azimuth * (Math.PI / 180.0);
-                        // Convert North-based Azimuth to East-based standard mathematical angle if necessary, 
-                        // or just apply directly depending on family orientation.
+                        double azimuthRad = ptFeature.Azimuth * (Math.PI / 180.0);
                         Line zAxis = Line.CreateBound(location, location + XYZ.BasisZ);
                         ElementTransformUtils.RotateElement(doc, instance.Id, zAxis, azimuthRad);
                     }
 
-                    // 2. Inclination Rotation (Vertical Tilt)
-                    // Assuming Inclination is the downward dip from horizontal
-                    if (nail.Inclination != 0)
+                    // Inclination Rotation
+                    if (ptFeature.Inclination != 0)
                     {
-                        double inclRad = nail.Inclination * (Math.PI / 180.0);
-                        
-                        // We must rotate around the local perpendicular axis, which depends on the Azimuth.
-                        // Calculate horizontal vector:
-                        double azRad = nail.Azimuth * (Math.PI / 180.0);
+                        double inclRad = ptFeature.Inclination * (Math.PI / 180.0);
+                        double azRad = ptFeature.Azimuth * (Math.PI / 180.0);
                         XYZ dir = new XYZ(Math.Cos(azRad), Math.Sin(azRad), 0).Normalize();
-                        
-                        // Cross product with Z to get the horizontal pitch axis
                         XYZ horizontalPitchAxis = dir.CrossProduct(XYZ.BasisZ).Normalize();
                         
                         Line pitchAxisLine = Line.CreateBound(location, location + horizontalPitchAxis);
                         ElementTransformUtils.RotateElement(doc, instance.Id, pitchAxisLine, inclRad);
                     }
 
-                    // 3. Set custom parameters defined in the CEDD rfa
-                    SetParameter(instance, "Overall Length", nail.Length * mToFt);
-                    SetParameter(instance, "Hole Dia", nail.HoleDia);
+                    // Properties
+                    SetParameter(instance, "Overall Length", ptFeature.Length * mToFt);
+                    SetParameter(instance, "Hole Dia", ptFeature.HoleDia);
+                    pointCount++;
+                }
 
-                    count++;
+                // 3b: Process Line Features (U-Channels, Hoarding)
+                foreach (var lineFeature in lines)
+                {
+                    // For line-based families like U-Channels, we usually build Adaptive Components 
+                    // or Line-Based Generic Models in Revit. 
+                    // This logic assumes `familySymbol` is a Line-Based Family (2 reference points).
+                    
+                    for (int i = 0; i < lineFeature.Vertices.Count - 1; i++)
+                    {
+                        XYZ startPt = lineFeature.Vertices[i];
+                        XYZ endPt = lineFeature.Vertices[i + 1];
+                        
+                        // Avoid segmenting elements if distance is near zero
+                        if (startPt.DistanceTo(endPt) > 0.1) 
+                        {
+                            Line curve = Line.CreateBound(startPt, endPt);
+                            FamilyInstance instance = doc.Create.NewFamilyInstance(curve, familySymbol, doc.ActiveView);
+                            lineCount++;
+                        }
+                    }
                 }
 
                 trans.Commit();
-                TaskDialog.Show("Success", $"Successfully generated {count} CEDD Soil Nails from Shapefile attributes.");
+                TaskDialog.Show("Success", $"Successfully generated {pointCount} Points (Nails/Trees) and {lineCount} Curve Segments (Channels/Hoarding).");
             }
 
             return Result.Succeeded;
@@ -136,43 +150,70 @@ namespace CEDDSlopeModeler
             }
         }
 
-        private List<SoilNailFeature> ReadShapefile(string shpPath)
+        private (List<PointFeature>, List<LineFeature>) ReadShapefile(string shpPath)
         {
-            var features = new List<SoilNailFeature>();
+            var points = new List<PointFeature>();
+            var lines = new List<LineFeature>();
+
             try
             {
-                // NetTopologySuite built-in Shapefile reader
                 using (var reader = new ShapefileDataReader(shpPath, new GeometryFactory()))
                 {
                     while (reader.Read())
                     {
                         var geom = reader.Geometry;
+
+                        // Parse Points
                         if (geom is NetTopologySuite.Geometries.Point pt)
                         {
-                            var feature = new SoilNailFeature
+                            var feature = new PointFeature
                             {
                                 X = pt.X,
                                 Y = pt.Y,
-                                Z = pt.Coordinate.Z > 0 || pt.Coordinate.Z < 0 ? pt.Coordinate.Z : 0 // Some SHPs don't have true Z
+                                Z = pt.Coordinate.Z > 0 || pt.Coordinate.Z < 0 ? pt.Coordinate.Z : 0
                             };
 
-                            // Read attributes from DBF
-                            // Property names depend exactly on the generated Shapefile columns
                             try { feature.Azimuth = Convert.ToDouble(reader["Azimuth"] ?? 0); } catch { }
                             try { feature.Inclination = Convert.ToDouble(reader["Inclin"] ?? 0); } catch { }
                             try { feature.Length = Convert.ToDouble(reader["Length"] ?? 0); } catch { }
                             try { feature.HoleDia = Convert.ToString(reader["HoleDia"]) ?? ""; } catch { }
 
-                            features.Add(feature);
+                            points.Add(feature);
+                        }
+                        // Parse Lines
+                        else if (geom is NetTopologySuite.Geometries.LineString ls)
+                        {
+                            var feature = new LineFeature();
+                            foreach (var coord in ls.Coordinates)
+                            {
+                                // Handle missing Z coordinates in 2D shapefiles gracefully
+                                double z = coord.Z > 0 || coord.Z < 0 ? coord.Z : 0;
+                                feature.Vertices.Add(new XYZ(coord.X * mToFt, coord.Y * mToFt, z * mToFt));
+                            }
+                            lines.Add(feature);
+                        }
+                        // Parse MultiLines (often used for fragmented U-channel networks)
+                        else if (geom is NetTopologySuite.Geometries.MultiLineString mls)
+                        {
+                            foreach (var lineString in mls.Geometries)
+                            {
+                                var feature = new LineFeature();
+                                foreach (var coord in lineString.Coordinates)
+                                {
+                                    double z = coord.Z > 0 || coord.Z < 0 ? coord.Z : 0;
+                                    feature.Vertices.Add(new XYZ(coord.X * mToFt, coord.Y * mToFt, z * mToFt));
+                                }
+                                lines.Add(feature);
+                            }
                         }
                     }
                 }
-                return features;
+                return (points, lines);
             }
             catch(Exception e)
             {
-                TaskDialog.Show("SHP Error", "Error reading Shapefile/DBF: " + e.Message);
-                return null;
+                TaskDialog.Show("SHP Error", "Error reading Shapefile: " + e.Message);
+                return (points, lines);
             }
         }
 
