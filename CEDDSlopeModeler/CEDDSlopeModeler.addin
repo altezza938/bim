@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>CEDD Slope Modeler</Name>
+    <Assembly>.\CEDDSlopeModeler.dll</Assembly>
+    <AddInId>12345678-1234-1234-1234-123456789abc</AddInId>
+    <FullClassName>CEDDSlopeModeler.App</FullClassName>
+    <VendorId>CEDD_DEV</VendorId>
+    <VendorDescription>CEDD Slope Modeler Automation</VendorDescription>
+  </AddIn>
+</RevitAddIns>
