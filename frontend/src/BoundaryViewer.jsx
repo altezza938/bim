@@ -55,9 +55,8 @@ export default function BoundaryViewer() {
             formData.append('fgdb', file);
 
             try {
-                // If the frontend is hosted on HTTPS (like GitHub pages), 
-                // making a fetch to http://localhost:3001 will trigger a Mixed Content block.
-                const apiUrl = 'http://localhost:3001/api/upload-fgdb';
+                // The backend is hosted securely on Hugging Face Spaces
+                const apiUrl = 'https://altezza938-bim.hf.space/api/upload-fgdb';
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     body: formData,
@@ -76,7 +75,7 @@ export default function BoundaryViewer() {
             } catch (err) {
                 console.error("Upload error details:", err);
                 if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
-                    alert("Network Error: Could not connect to the local Python backend on port 3001.\n\nIf you are using the live GitHub Pages site, your browser is blocking the connection to your local machine (Mixed Content Error). \n\nPlease run the frontend locally using 'npm run dev' to use the FGDB parser, OR allow insecure localhost connections in your browser settings.");
+                    alert("Network Error: Could not connect to the Hugging Face backend. Please make sure the Space is 'Running'.");
                 } else {
                     alert(`Error: ${err.message}`);
                 }
@@ -120,7 +119,8 @@ export default function BoundaryViewer() {
             // It's an FGDB feature, we need to fetch its geometry from the backend
             setIsLoading(true);
             try {
-                const response = await fetch('http://localhost:3001/api/extract-feature', {
+                // The backend is hosted securely on Hugging Face Spaces
+                const response = await fetch('https://altezza938-bim.hf.space/api/extract-feature', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ filePath: uploadedFilePath, featureNo: featureNo })
@@ -141,7 +141,7 @@ export default function BoundaryViewer() {
             } catch (err) {
                 console.error("Extraction error details:", err);
                 if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
-                    alert("Network Error: Could not connect to the local Python backend on port 3001.\n\nPlease run the frontend locally using 'npm run dev' to use this feature.");
+                    alert("Network Error: Could not connect to the Hugging Face backend. Please make sure the Space is 'Running'.");
                 } else {
                     alert(`Error: ${err.message}`);
                 }
