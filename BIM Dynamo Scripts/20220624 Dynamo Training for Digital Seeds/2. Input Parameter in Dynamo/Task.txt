@@ -1,0 +1,13 @@
+1. Most simple case:
+Import Column B to Structural Foundation Comments
+
+2. Little modification on the selection:
+Import Column B to Structural Column Comments (with size 2<m3)
+
+3. Little modification on the import excel:
+Import Column B & C to Structural Framing Start Level Offset & End Level Offset
+
+4. Little modification on the Assign parameter:
+Import Column B to untick the Room Bounding for Wall
+and
+Import Column C to tick the Precast for Wall

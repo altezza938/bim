@@ -1,0 +1,8 @@
+node_modules/
+backend/uploads/
+.DS_Store
+*.env
+dist/
+CEDDSlopeModeler/bin/
+CEDDSlopeModeler/obj/
+CEDDSlopeModeler/Families/*.zip

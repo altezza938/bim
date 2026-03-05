@@ -1,0 +1,14 @@
+1. Most simple case:
+Extract Wall marks + Element ID to Excel (file Output1, sheetname sheet1)
+
+2. Little modification on the selection:
+Extract Structural Columns marks + Element ID to Excel (file Output1, sheetname sheet1)
+
+3. Little modification on the list treatment:
+Extract Structural Columns marks (with Volume>2 m3) + Element ID to Excel (file Output1, sheetname sheet1)
+
+4. Little modification on the get parameter:
+Extract L3 (i.e. Referenece Level = Level 3) Structural Framing Length, Volume, Elevation at Top, Elevation at Bottom + Element ID comments to Excel (file Output1, sheetname sheet1)
+
+5. Little modification on the exported excel:
+Extract Structural Foundation marks to Excel (file Output2, sheet name: SF)
